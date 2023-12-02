@@ -1,6 +1,8 @@
 use std::collections::BinaryHeap;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::{Debug, Formatter, Result};
+use std::hash::Hash;
+use std::io::{self};
 
 const ACTIONS: [(isize, isize); 4] = [(1, 0), (0, -1), (-1, 0), (0, 1)];
 
@@ -66,10 +68,7 @@ struct Puzzle {
     space_pos: (usize, usize),
     count: usize,
     heuristic: usize,
-    before_action: Option<(isize, isize)>,
-    parent: Option<Box<Puzzle>>,
 }
-
 impl Puzzle {
     fn new(n: usize, m: usize, board: Vec<Vec<usize>>) -> Self {
         let mut space_pos = (0, 0);
@@ -87,8 +86,6 @@ impl Puzzle {
             space_pos,
             count: 0,
             heuristic: 0,
-            before_action: None,
-            parent: None,
         }
     }
 
@@ -100,12 +97,17 @@ impl Puzzle {
             return false;
         }
         let (nx, ny) = (nx as usize, ny as usize);
+
+        let v = self.board[ny][nx];
+        self.heuristic += (x as isize - (v - 1) as isize % self.m as isize).abs() as usize
+            + (y as isize - (v - 1) as isize / self.m as isize).abs() as usize;
+        self.heuristic -= (nx as isize - (v - 1) as isize % self.m as isize).abs() as usize;
+        self.heuristic -= (ny as isize - (v - 1) as isize / self.m as isize).abs() as usize;
+
         self.board[y][x] = self.board[ny][nx];
         self.board[ny][nx] = 0;
         self.space_pos = (nx, ny);
         self.count += 1;
-        self.heuristic = get_manhattan_distance(self);
-        self.before_action = Some(action);
         true
     }
 
@@ -193,25 +195,41 @@ fn is_valid(puzzle: &Puzzle) -> bool {
     true
 }
 
-fn is_solvable(puzzle: &Puzzle) -> bool {
+fn get_inversion_number(puzzle: &Puzzle) -> usize {
     let mut inv = 0;
     let n_ = puzzle.n * puzzle.m;
     let mut a = Vec::new();
     for i in 0..puzzle.n {
-        for j in 0..puzzle.m {
-            a.push(puzzle.board[i][j]);
+        if i % 2 == 0 {
+            for j in 0..puzzle.m {
+                if puzzle.board[i][j] == 0 {
+                    continue;
+                }
+                a.push(puzzle.board[i][j]);
+            }
+        } else {
+            for j in (0..puzzle.m).rev() {
+                if puzzle.board[i][j] == 0 {
+                    continue;
+                }
+                a.push(puzzle.board[i][j]);
+            }
         }
     }
-    let (sx, sy) = puzzle.space_pos;
-    let s_index = sy * puzzle.m + sx;
-    a[s_index] = n_;
     let mut seg_tree = SegTree::new(n_, |x, y| x + y, 0);
-    for i in 0..n_ {
+    for i in 0..(n_ - 1) {
         let v = a[i] - 1;
         inv += v - seg_tree.query(0, v);
         seg_tree.update(v, 1);
     }
-    (inv % 2 == 0) == (((puzzle.n - 1 - sy) + (puzzle.m - 1 - sx)) % 2 == 0)
+    inv
+}
+
+fn is_solvable(puzzle: &Puzzle) -> bool {
+    let inv = get_inversion_number(puzzle);
+    let goal = create_goal(puzzle);
+    let goal_inv = get_inversion_number(&Puzzle::new(puzzle.n, puzzle.m, goal));
+    inv % 2 == goal_inv % 2
 }
 
 fn create_goal(puzzle: &Puzzle) -> Vec<Vec<usize>> {
@@ -250,7 +268,7 @@ fn bfs(puzzle: &Puzzle) -> Option<Vec<(isize, isize)>> {
                 state = puzzle.get_state();
             }
             path.reverse();
-            // println!("visited count: {}", visited_count);
+            println!("visited count: {}", visited_count);
             return Some(path);
         }
         for action in puzzle.get_legal_actions() {
@@ -284,12 +302,26 @@ fn get_manhattan_distance(puzzle: &Puzzle) -> usize {
     distance
 }
 
+fn get_before_states(puzzle: &Puzzle) -> Vec<((isize, isize), Vec<Vec<usize>>)> {
+    let mut before_states = Vec::new();
+    let actions = puzzle.get_legal_actions();
+    for action in actions {
+        let mut puzzle = puzzle.clone();
+        puzzle.step(action);
+        let reverse_action = get_reverse_action(action);
+        before_states.push((reverse_action, puzzle.get_state()));
+    }
+    before_states
+}
+
 fn a_star(puzzle: &Puzzle) -> Option<Vec<(isize, isize)>> {
     let mut puzzle = puzzle.clone();
+    let start = puzzle.get_state();
     let mut queue = BinaryHeap::new();
     let mut visited = HashMap::new();
-    // let mut before_action = HashMap::new();
     let goal = create_goal(&puzzle);
+    let mut count_map = HashMap::new();
+    count_map.insert(start.clone(), 0);
     puzzle.heuristic = get_manhattan_distance(&puzzle);
     queue.push(puzzle.clone());
     let mut visited_count = 0;
@@ -298,27 +330,44 @@ fn a_star(puzzle: &Puzzle) -> Option<Vec<(isize, isize)>> {
         eprint!("\r{}", visited_count);
         if puzzle.get_state() == goal {
             let mut path = Vec::new();
-            while let Some(parent) = puzzle.parent {
-                let action = puzzle.before_action.unwrap();
-                path.push(action);
-                puzzle = *parent;
+            while puzzle.get_state() != start {
+                let before_states = get_before_states(&puzzle);
+                let mut min_count = std::usize::MAX;
+                let mut min_state = Vec::new();
+                let mut min_action = None;
+                for (action, state) in before_states.iter() {
+                    if let Some(count) = count_map.get(state) {
+                        if *count < min_count {
+                            min_count = *count;
+                            min_state = state.clone();
+                            min_action = Some(*action);
+                        }
+                    }
+                }
+                puzzle = Puzzle::new(puzzle.n, puzzle.m, min_state);
+                puzzle.count = min_count;
+                path.push(min_action.unwrap());
             }
             path.reverse();
-            // println!("visited count: {}", visited_count);
+            println!("visited count: {}", visited_count);
             return Some(path);
         }
         visited.insert(puzzle.board.clone(), puzzle.clone());
         for action in puzzle.get_legal_actions() {
             let mut next_puzzle = puzzle.clone();
             next_puzzle.step(action);
-            next_puzzle.parent = Some(Box::new(puzzle.clone()));
-            let state = next_puzzle.get_state();
+            let state = next_puzzle.clone().get_state();
+            if count_map.contains_key(&state) {
+                continue;
+            } else {
+                count_map.insert(next_puzzle.get_state(), next_puzzle.count);
+            }
             if let Some(puzzle) = visited.get(&state) {
                 if *puzzle <= next_puzzle {
                     continue;
                 }
             }
-            queue.push(next_puzzle.clone());
+            queue.push(next_puzzle);
         }
     }
     None
@@ -338,13 +387,32 @@ fn get_inversion_number_without_segtree(a: Vec<usize>) -> usize {
 }
 
 fn main() {
-    let board = vec![
-        vec![2, 1, 3, 4],
-        vec![5, 6, 7, 8],
-        vec![9, 10, 11, 12],
-        vec![13, 15, 14, 0],
-    ];
-    let mut puzzle = Puzzle::new(4, 4, board);
+    let mut n_m_input = String::new();
+    io::stdin()
+        .read_line(&mut n_m_input)
+        .expect("Failed to read line");
+    let (n, m) = {
+        let mut iter = n_m_input.split_whitespace();
+        let n: usize = iter.next().unwrap().parse().unwrap();
+        let m: usize = iter.next().unwrap().parse().unwrap();
+        (n, m)
+    };
+    let mut board = Vec::new();
+    for _ in 0..n {
+        let mut line = String::new();
+        io::stdin()
+            .read_line(&mut line)
+            .expect("Failed to read line");
+        let mut iter = line.split_whitespace();
+        let mut row = Vec::new();
+        for _ in 0..m {
+            let v: usize = iter.next().unwrap().parse().unwrap();
+            row.push(v);
+        }
+        board.push(row);
+    }
+
+    let mut puzzle = Puzzle::new(n, m, board);
     println!("{:?}", puzzle);
     if !is_valid(&puzzle) {
         println!("invalid");
@@ -365,7 +433,7 @@ fn main() {
         for action in path {
             println!("{} {}", action.0, action.1);
             puzzle.step(action);
-            // println!("{:?}", puzzle);
+            println!("{:?}", puzzle);
         }
     }
 }

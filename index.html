@@ -70,7 +70,11 @@
         for (const piece of puzzlePieces) {
           const puzzlePiece = document.createElement('div');
           puzzlePiece.className = 'puzzle-piece';
-          puzzlePiece.textContent = piece;
+          if (piece === '0') {
+            puzzlePiece.textContent = '';
+          } else {
+            puzzlePiece.textContent = piece;
+          }
           puzzleContainer.appendChild(puzzlePiece);
         }
       }
@@ -88,7 +92,6 @@
 
     function animateSteps(steps) {
       if (currentStep >= steps.length) {
-        // check if puzzle is solved
         const puzzlePieces = document.querySelectorAll('.puzzle-piece');
         let isSolved = true;
         puzzlePieces.forEach((piece, index) => {
@@ -111,14 +114,14 @@
 
       let emptyPieceIndex;
       puzzlePieces.forEach((piece, index) => {
-        if (piece.textContent === '0') {
+        if (piece.textContent === '') {
           emptyPieceIndex = index;
         }
       });
 
       const targetIndex = emptyPieceIndex + move[1] * 4 + move[0];
       puzzlePieces[emptyPieceIndex].textContent = puzzlePieces[targetIndex].textContent
-      puzzlePieces[targetIndex].textContent = '0';
+      puzzlePieces[targetIndex].textContent = '';
 
       currentStep++;
 
