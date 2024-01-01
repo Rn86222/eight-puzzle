@@ -4,7 +4,9 @@ use std::fmt::{Debug, Formatter, Result};
 use std::hash::Hash;
 use std::io::{self};
 
-const ACTIONS: [(isize, isize); 4] = [(1, 0), (0, -1), (-1, 0), (0, 1)];
+type Action = (isize, isize);
+type State = Vec<Vec<usize>>;
+const ACTIONS: [Action; 4] = [(1, 0), (0, -1), (-1, 0), (0, 1)];
 
 pub struct SegTree<X: Clone> {
     n: usize,
@@ -64,17 +66,18 @@ impl<X: Clone> SegTree<X> {
 struct Puzzle {
     n: usize,
     m: usize,
-    board: Vec<Vec<usize>>,
+    board: State,
     space_pos: (usize, usize),
     count: usize,
     heuristic: usize,
 }
+
 impl Puzzle {
-    fn new(n: usize, m: usize, board: Vec<Vec<usize>>) -> Self {
+    fn new(n: usize, m: usize, board: State) -> Self {
         let mut space_pos = (0, 0);
-        for i in 0..n {
-            for j in 0..m {
-                if board[i][j] == 0 {
+        for (i, row) in board.iter().enumerate() {
+            for (j, col) in row.iter().enumerate() {
+                if *col == 0 {
                     space_pos = (j, i);
                 }
             }
@@ -89,7 +92,7 @@ impl Puzzle {
         }
     }
 
-    fn step(&mut self, action: (isize, isize)) -> bool {
+    fn step(&mut self, action: Action) -> bool {
         let (x, y) = self.space_pos;
         let (dx, dy) = action;
         let (nx, ny) = (x as isize + dx, y as isize + dy);
@@ -99,10 +102,10 @@ impl Puzzle {
         let (nx, ny) = (nx as usize, ny as usize);
 
         let v = self.board[ny][nx];
-        self.heuristic += (x as isize - (v - 1) as isize % self.m as isize).abs() as usize
-            + (y as isize - (v - 1) as isize / self.m as isize).abs() as usize;
-        self.heuristic -= (nx as isize - (v - 1) as isize % self.m as isize).abs() as usize;
-        self.heuristic -= (ny as isize - (v - 1) as isize / self.m as isize).abs() as usize;
+        self.heuristic += (x as isize - (v - 1) as isize % self.m as isize).unsigned_abs()
+            + (y as isize - (v - 1) as isize / self.m as isize).unsigned_abs();
+        self.heuristic -= (nx as isize - (v - 1) as isize % self.m as isize).unsigned_abs();
+        self.heuristic -= (ny as isize - (v - 1) as isize / self.m as isize).unsigned_abs();
 
         self.board[y][x] = self.board[ny][nx];
         self.board[ny][nx] = 0;
@@ -111,11 +114,26 @@ impl Puzzle {
         true
     }
 
-    fn get_state(&self) -> Vec<Vec<usize>> {
+    fn move_only(&mut self, action: Action) -> bool {
+        let (x, y) = self.space_pos;
+        let (dx, dy) = action;
+        let (nx, ny) = (x as isize + dx, y as isize + dy);
+        if nx < 0 || nx >= self.n as isize || ny < 0 || ny >= self.m as isize {
+            return false;
+        }
+        let (nx, ny) = (nx as usize, ny as usize);
+
+        self.board[y][x] = self.board[ny][nx];
+        self.board[ny][nx] = 0;
+        self.space_pos = (nx, ny);
+        true
+    }
+
+    fn get_state(&self) -> State {
         self.board.clone()
     }
 
-    fn get_legal_actions(&self) -> Vec<(isize, isize)> {
+    fn get_legal_actions(&self) -> Vec<Action> {
         let mut actions = Vec::new();
         for action in ACTIONS.iter() {
             let (x, y) = self.space_pos;
@@ -164,7 +182,7 @@ impl Ord for Puzzle {
     }
 }
 
-fn get_reverse_action(action: (isize, isize)) -> (isize, isize) {
+fn get_reverse_action(action: Action) -> Action {
     let (dx, dy) = action;
     (-dx, -dy)
 }
@@ -217,8 +235,8 @@ fn get_inversion_number(puzzle: &Puzzle) -> usize {
         }
     }
     let mut seg_tree = SegTree::new(n_, |x, y| x + y, 0);
-    for i in 0..(n_ - 1) {
-        let v = a[i] - 1;
+    for ai in a.iter() {
+        let v = ai - 1;
         inv += v - seg_tree.query(0, v);
         seg_tree.update(v, 1);
     }
@@ -232,7 +250,7 @@ fn is_solvable(puzzle: &Puzzle) -> bool {
     inv % 2 == goal_inv % 2
 }
 
-fn create_goal(puzzle: &Puzzle) -> Vec<Vec<usize>> {
+fn create_goal(puzzle: &Puzzle) -> State {
     let (n, m) = (puzzle.n, puzzle.m);
     let mut goal = vec![];
     for i in 0..n {
@@ -246,7 +264,8 @@ fn create_goal(puzzle: &Puzzle) -> Vec<Vec<usize>> {
     goal
 }
 
-fn bfs(puzzle: &Puzzle) -> Option<Vec<(isize, isize)>> {
+#[allow(dead_code)]
+fn bfs(puzzle: &Puzzle) -> Option<Vec<Action>> {
     let mut queue = VecDeque::new();
     let mut visited = HashSet::new();
     let mut parent = HashMap::new();
@@ -296,25 +315,25 @@ fn get_manhattan_distance(puzzle: &Puzzle) -> usize {
             }
             let (x, y) = ((v - 1) % puzzle.m, (v - 1) / puzzle.m);
             distance +=
-                (x as isize - j as isize).abs() as usize + (y as isize - i as isize).abs() as usize;
+                (x as isize - j as isize).unsigned_abs() + (y as isize - i as isize).unsigned_abs();
         }
     }
     distance
 }
 
-fn get_before_states(puzzle: &Puzzle) -> Vec<((isize, isize), Vec<Vec<usize>>)> {
+fn get_before_states(puzzle: &Puzzle) -> Vec<(Action, State)> {
     let mut before_states = Vec::new();
     let actions = puzzle.get_legal_actions();
     for action in actions {
         let mut puzzle = puzzle.clone();
-        puzzle.step(action);
+        puzzle.move_only(action);
         let reverse_action = get_reverse_action(action);
         before_states.push((reverse_action, puzzle.get_state()));
     }
     before_states
 }
 
-fn a_star(puzzle: &Puzzle) -> Option<Vec<(isize, isize)>> {
+fn a_star(puzzle: &Puzzle) -> Option<Vec<Action>> {
     let mut puzzle = puzzle.clone();
     let start = puzzle.get_state();
     let mut queue = BinaryHeap::new();
@@ -323,11 +342,13 @@ fn a_star(puzzle: &Puzzle) -> Option<Vec<(isize, isize)>> {
     let mut count_map = HashMap::new();
     count_map.insert(start.clone(), 0);
     puzzle.heuristic = get_manhattan_distance(&puzzle);
-    queue.push(puzzle.clone());
+    queue.push(puzzle);
     let mut visited_count = 0;
     while let Some(mut puzzle) = queue.pop() {
         visited_count += 1;
-        eprint!("\r{}", visited_count);
+        if visited_count % 10000 == 0 {
+            eprint!("\r{}", visited_count);
+        }
         if puzzle.get_state() == goal {
             let mut path = Vec::new();
             while puzzle.get_state() != start {
@@ -373,6 +394,7 @@ fn a_star(puzzle: &Puzzle) -> Option<Vec<(isize, isize)>> {
     None
 }
 
+#[allow(dead_code)]
 fn get_inversion_number_without_segtree(a: Vec<usize>) -> usize {
     let n = a.len();
     let mut inv = 0;
@@ -432,7 +454,7 @@ fn main() {
     if let Some(path) = a_star(&puzzle) {
         for action in path {
             println!("{} {}", action.0, action.1);
-            puzzle.step(action);
+            puzzle.move_only(action);
             println!("{:?}", puzzle);
         }
     }
