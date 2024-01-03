@@ -2,7 +2,7 @@ use std::collections::BinaryHeap;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::{Debug, Formatter, Result};
 use std::hash::Hash;
-use std::io::{self};
+use std::io;
 
 type Action = (isize, isize);
 type State = Vec<Vec<usize>>;
@@ -129,8 +129,8 @@ impl Puzzle {
         true
     }
 
-    fn get_state(&self) -> State {
-        self.board.clone()
+    fn get_state(&self) -> &State {
+        &self.board
     }
 
     fn get_legal_actions(&self) -> Vec<Action> {
@@ -217,19 +217,11 @@ fn get_inversion_number(puzzle: &Puzzle) -> usize {
     let mut inv = 0;
     let n_ = puzzle.n * puzzle.m;
     let mut a = Vec::new();
-    for i in 0..puzzle.n {
-        if i % 2 == 0 {
-            for j in 0..puzzle.m {
-                if puzzle.board[i][j] == 0 {
-                    continue;
-                }
-                a.push(puzzle.board[i][j]);
-            }
-        } else {
-            for j in (0..puzzle.m).rev() {
-                if puzzle.board[i][j] == 0 {
-                    continue;
-                }
+    for i in 0..puzzle.m {
+        for j in 0..puzzle.n {
+            if puzzle.board[i][j] == 0 {
+                a.push(puzzle.n * puzzle.m);
+            } else {
                 a.push(puzzle.board[i][j]);
             }
         }
@@ -245,9 +237,10 @@ fn get_inversion_number(puzzle: &Puzzle) -> usize {
 
 fn is_solvable(puzzle: &Puzzle) -> bool {
     let inv = get_inversion_number(puzzle);
-    let goal = create_goal(puzzle);
-    let goal_inv = get_inversion_number(&Puzzle::new(puzzle.n, puzzle.m, goal));
-    inv % 2 == goal_inv % 2
+    let (x, y) = puzzle.space_pos;
+    let (dx, dy) = (puzzle.m - 1 - x, puzzle.n - 1 - y);
+    let space_manhattan_distance = dx + dy;
+    inv % 2 == space_manhattan_distance % 2
 }
 
 fn create_goal(puzzle: &Puzzle) -> State {
@@ -269,18 +262,20 @@ fn bfs(puzzle: &Puzzle) -> Option<Vec<Action>> {
     let mut queue = VecDeque::new();
     let mut visited = HashSet::new();
     let mut parent = HashMap::new();
-    queue.push_back(puzzle.get_state());
-    visited.insert(puzzle.get_state());
+    queue.push_back(puzzle.get_state().clone());
+    visited.insert(puzzle.get_state().clone());
     let goal = create_goal(puzzle);
     let mut visited_count = 0;
     while let Some(state) = queue.pop_front() {
         visited_count += 1;
-        eprint!("\r{}", visited_count);
-        let mut puzzle = Puzzle::new(puzzle.n, puzzle.m, state);
-        if puzzle.get_state() == goal {
+        if visited_count % 10000 == 0 {
+            eprint!("\r{}", visited_count);
+        }
+        let mut puzzle = Puzzle::new(puzzle.n, puzzle.m, state.clone());
+        if *puzzle.get_state() == goal {
             let mut path = Vec::new();
             let mut state = puzzle.get_state();
-            while let Some(action) = parent.get(&state) {
+            while let Some(action) = parent.get(state) {
                 let reverse_action = get_reverse_action(*action);
                 path.push(*action);
                 puzzle.step(reverse_action);
@@ -291,15 +286,15 @@ fn bfs(puzzle: &Puzzle) -> Option<Vec<Action>> {
             return Some(path);
         }
         for action in puzzle.get_legal_actions() {
-            let mut puzzle = puzzle.clone();
-            puzzle.step(action);
-            let state = puzzle.get_state();
-            if visited.contains(&state) {
+            let mut next_puzzle = puzzle.clone();
+            next_puzzle.step(action);
+            let state = next_puzzle.get_state();
+            if visited.contains(state) {
                 continue;
             }
             queue.push_back(state.clone());
             visited.insert(state.clone());
-            parent.insert(state, action);
+            parent.insert(state.clone(), action);
         }
     }
     None
@@ -328,14 +323,15 @@ fn get_before_states(puzzle: &Puzzle) -> Vec<(Action, State)> {
         let mut puzzle = puzzle.clone();
         puzzle.move_only(action);
         let reverse_action = get_reverse_action(action);
-        before_states.push((reverse_action, puzzle.get_state()));
+        before_states.push((reverse_action, puzzle.get_state().clone()));
     }
     before_states
 }
 
-fn a_star(puzzle: &Puzzle) -> Option<Vec<Action>> {
+#[allow(dead_code)]
+fn astar(puzzle: &Puzzle) -> Option<Vec<Action>> {
     let mut puzzle = puzzle.clone();
-    let start = puzzle.get_state();
+    let start = puzzle.get_state().clone();
     let mut queue = BinaryHeap::new();
     let mut visited = HashMap::new();
     let goal = create_goal(&puzzle);
@@ -349,9 +345,9 @@ fn a_star(puzzle: &Puzzle) -> Option<Vec<Action>> {
         if visited_count % 10000 == 0 {
             eprint!("\r{}", visited_count);
         }
-        if puzzle.get_state() == goal {
+        if *puzzle.get_state() == goal {
             let mut path = Vec::new();
-            while puzzle.get_state() != start {
+            while *puzzle.get_state() != start {
                 let before_states = get_before_states(&puzzle);
                 let mut min_count = std::usize::MAX;
                 let mut min_state = Vec::new();
@@ -377,13 +373,13 @@ fn a_star(puzzle: &Puzzle) -> Option<Vec<Action>> {
         for action in puzzle.get_legal_actions() {
             let mut next_puzzle = puzzle.clone();
             next_puzzle.step(action);
-            let state = next_puzzle.clone().get_state();
-            if count_map.contains_key(&state) {
+            let state = next_puzzle.get_state();
+            if count_map.contains_key(state) {
                 continue;
             } else {
-                count_map.insert(next_puzzle.get_state(), next_puzzle.count);
+                count_map.insert(state.clone(), next_puzzle.count);
             }
-            if let Some(puzzle) = visited.get(&state) {
+            if let Some(puzzle) = visited.get(state) {
                 if *puzzle <= next_puzzle {
                     continue;
                 }
@@ -394,20 +390,6 @@ fn a_star(puzzle: &Puzzle) -> Option<Vec<Action>> {
     None
 }
 
-#[allow(dead_code)]
-fn get_inversion_number_without_segtree(a: Vec<usize>) -> usize {
-    let n = a.len();
-    let mut inv = 0;
-    for i in 0..n {
-        for j in 0..i {
-            if a[j] > a[i] {
-                inv += 1;
-            }
-        }
-    }
-    inv
-}
-
 fn main() {
     let mut n_m_input = String::new();
     io::stdin()
@@ -415,6 +397,10 @@ fn main() {
         .expect("Failed to read line");
     let (n, m) = {
         let mut iter = n_m_input.split_whitespace();
+        if iter.clone().count() != 2 {
+            eprintln!("invalid");
+            return;
+        }
         let n: usize = iter.next().unwrap().parse().unwrap();
         let m: usize = iter.next().unwrap().parse().unwrap();
         (n, m)
@@ -422,10 +408,12 @@ fn main() {
     let mut board = Vec::new();
     for _ in 0..n {
         let mut line = String::new();
-        io::stdin()
-            .read_line(&mut line)
-            .expect("Failed to read line");
+        io::stdin().read_line(&mut line).expect("invalid");
         let mut iter = line.split_whitespace();
+        if iter.clone().count() != m {
+            eprintln!("invalid");
+            return;
+        }
         let mut row = Vec::new();
         for _ in 0..m {
             let v: usize = iter.next().unwrap().parse().unwrap();
@@ -437,21 +425,15 @@ fn main() {
     let mut puzzle = Puzzle::new(n, m, board);
     println!("{:?}", puzzle);
     if !is_valid(&puzzle) {
-        println!("invalid");
+        eprintln!("invalid");
         return;
     }
     if !is_solvable(&puzzle) {
         println!("unsolvable");
         return;
     }
-    // if let Some(path) = bfs(&puzzle) {
-    //     for action in path {
-    //         println!("{:?}", action);
-    //         puzzle.step(action);
-    //         println!("{:?}", puzzle);
-    //     }
-    // }
-    if let Some(path) = a_star(&puzzle) {
+    if let Some(path) = astar(&puzzle) {
+        println!("path length: {}", path.len());
         for action in path {
             println!("{} {}", action.0, action.1);
             puzzle.move_only(action);
