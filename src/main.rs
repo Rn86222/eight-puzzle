@@ -392,9 +392,7 @@ fn astar(puzzle: &Puzzle) -> Option<Vec<Action>> {
 
 fn main() {
     let mut n_m_input = String::new();
-    io::stdin()
-        .read_line(&mut n_m_input)
-        .expect("Failed to read line");
+    io::stdin().read_line(&mut n_m_input).expect("invalid");
     let (n, m) = {
         let mut iter = n_m_input.split_whitespace();
         if iter.clone().count() != 2 {
